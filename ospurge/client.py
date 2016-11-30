@@ -59,15 +59,11 @@ class SwiftResources(base.Resources):
         super(SwiftResources, self).__init__(session)
         self.endpoint = self.session.get_endpoint("object-store")
         self.token = self.session.token
-        conn = swift_client.HTTPConnection(self.endpoint,
-                                           insecure=self.session.insecure)
-        self.http_conn = conn.parsed_url, conn
+        self.conn = swift_client.Connection(session=session.keystone_session)
 
     # This method is used to retrieve Objects as well as Containers.
     def list_containers(self):
-        containers = swift_client.get_account(self.endpoint,
-                                              self.token,
-                                              http_conn=self.http_conn)[1]
+        containers = self.conn.get_account()[1]
         return (cont['name'] for cont in containers)
 
 
@@ -77,17 +73,13 @@ class SwiftObjects(SwiftResources):
         swift_objects = []
         for cont in self.list_containers():
             objs = [{'container': cont, 'name': obj['name']} for obj in
-                    swift_client.get_container(self.endpoint,
-                                               self.token,
-                                               cont,
-                                               http_conn=self.http_conn)[1]]
+                    self.conn.get_container(cont)[1]]
             swift_objects.extend(objs)
         return swift_objects
 
     def delete(self, obj):
         super(SwiftObjects, self).delete(obj)
-        swift_client.delete_object(self.endpoint, token=self.token, http_conn=self.http_conn,
-                                   container=obj['container'], name=obj['name'])
+        self.conn.delete_object(obj['container'], obj['name'])
 
     def resource_str(self, obj):
         return "object {} in container {}".format(obj['name'], obj['container'])
@@ -101,7 +93,7 @@ class SwiftContainers(SwiftResources):
     def delete(self, container):
         """Container must be empty for deletion to succeed."""
         super(SwiftContainers, self).delete(container)
-        swift_client.delete_container(self.endpoint, self.token, container, http_conn=self.http_conn)
+        self.conn.delete_container(container)
 
     def resource_str(self, obj):
         return "container {}".format(obj)
@@ -805,6 +797,8 @@ def main():
         'admin_role_name': args.admin_role_name
     }
     project = args.admin_project if args.admin_project else args.project_name
+
+    os.environ['no_proxy'] = ','.join([os.environ.get('no_proxy'), '192.168.122.15'])
 
     try:
         keystone_manager = KeystoneManager(args.username, args.password,
